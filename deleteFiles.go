@@ -11,133 +11,60 @@ import (
 
 var token = url.QueryEscape("YOUR TOKEN HERE")
 
-const uri = "YOUR DOMAIN HERE.slack.com/api/%s?token=%s"
+const uri = "https://{YOURDOMAIN}.slack.com/api/%s?token=%s"
 
 var authURL = "auth.test?token="
 
-var userId = ""
+var userID = ""
 
-type auth struct {
-	Ok     bool   `json:"ok"`
-	URL    string `json:"url"`
-	Team   string `json:"team"`
-	User   string `json:"user"`
-	TeamID string `json:"team_id"`
-	UserID string `json:"user_id"`
-}
-
-type fileDelete struct {
-	Ok bool `json:"ok"`
-}
-
-type file struct {
-	ID                 string        `json:"id"`
-	Created            int           `json:"created"`
-	Timestamp          int           `json:"timestamp"`
-	Name               string        `json:"name"`
-	Title              string        `json:"title"`
-	Mimetype           string        `json:"mimetype"`
-	Filetype           string        `json:"filetype"`
-	PrettyType         string        `json:"pretty_type"`
-	User               string        `json:"user"`
-	Editable           bool          `json:"editable"`
-	Size               int           `json:"size"`
-	Mode               string        `json:"mode"`
-	IsExternal         bool          `json:"is_external"`
-	ExternalType       string        `json:"external_type"`
-	IsPublic           bool          `json:"is_public"`
-	PublicURLShared    bool          `json:"public_url_shared"`
-	DisplayAsBot       bool          `json:"display_as_bot"`
-	Username           string        `json:"username"`
-	URLPrivate         string        `json:"url_private"`
-	URLPrivateDownload string        `json:"url_private_download"`
-	Thumb64            string        `json:"thumb_64"`
-	Thumb80            string        `json:"thumb_80"`
-	Thumb360           string        `json:"thumb_360"`
-	Thumb360W          int           `json:"thumb_360_w"`
-	Thumb360H          int           `json:"thumb_360_h"`
-	Thumb480           string        `json:"thumb_480"`
-	Thumb480W          int           `json:"thumb_480_w"`
-	Thumb480H          int           `json:"thumb_480_h"`
-	Thumb160           string        `json:"thumb_160"`
-	Thumb720           string        `json:"thumb_720"`
-	Thumb720W          int           `json:"thumb_720_w"`
-	Thumb720H          int           `json:"thumb_720_h"`
-	Thumb800           string        `json:"thumb_800"`
-	Thumb800W          int           `json:"thumb_800_w"`
-	Thumb800H          int           `json:"thumb_800_h"`
-	Thumb960           string        `json:"thumb_960"`
-	Thumb960W          int           `json:"thumb_960_w"`
-	Thumb960H          int           `json:"thumb_960_h"`
-	Thumb1024          string        `json:"thumb_1024"`
-	Thumb1024W         int           `json:"thumb_1024_w"`
-	Thumb1024H         int           `json:"thumb_1024_h"`
-	ImageExifRotation  int           `json:"image_exif_rotation"`
-	OriginalW          int           `json:"original_w"`
-	OriginalH          int           `json:"original_h"`
-	Permalink          string        `json:"permalink"`
-	PermalinkPublic    string        `json:"permalink_public"`
-	Channels           []string      `json:"channels"`
-	Groups             []interface{} `json:"groups"`
-	Ims                []interface{} `json:"ims"`
-	CommentsCount      int           `json:"comments_count"`
-	InitialComment     struct {
-		ID        string `json:"id"`
-		Created   int    `json:"created"`
-		Timestamp int    `json:"timestamp"`
-		User      string `json:"user"`
-		IsIntro   bool   `json:"is_intro"`
-		Comment   string `json:"comment"`
-	} `json:"initial_comment"`
-}
-
-type fileList struct {
-	Ok     bool `json:"ok"`
-	Files  []*file
-	Paging struct {
-		Count int `json:"count"`
-		Total int `json:"total"`
-		Page  int `json:"page"`
-		Pages int `json:"pages"`
-	} `json:"paging"`
-}
-
-// This is somewhat unsafe - any errors with generic inteface will
-// only show up at runtime
-func getApi(url string, r interface{}) {
+func getAPI(url string) (result map[string]interface{}, err error) {
 	client := &http.Client{Timeout: time.Second * 10}
 
 	resp, err := client.Get(url)
 	if err != nil {
-		log.Printf("Unable to GET: %s", err)
+		log.Printf("Unable to GET: %s\n", err.Error())
+		return nil, err
 	}
 	defer resp.Body.Close()
 
-	if err := json.NewDecoder(resp.Body).Decode(r); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		log.Println(err)
+		return nil, err
 	}
+
+	return
 }
 
-func authenticate() bool {
+func authenticate() (bool, error) {
 	url := fmt.Sprintf(uri, "auth.test", token)
 
-	a := auth{}
+	auth, err := getAPI(url)
+	if err != nil {
+		return false, err
+	}
 
-	getApi(url, &a)
+	ok := auth["ok"].(bool)
+	if ok == false {
+		return false, nil
+	}
 
-	userId = a.UserID
+	userID := auth["user_id"].(string)
+	if userID == "" {
+		return false, nil
+	}
 
-	return a.Ok
+	return true, nil
 }
 
-func getFileList() fileList {
-	url := fmt.Sprintf(uri+"&user="+userId, "files.list", token)
+func getFileList() (map[string]interface{}, error) {
+	url := fmt.Sprintf(uri+"&user="+userID, "files.list", token)
 
-	files := fileList{}
+	files, err := getAPI(url)
+	if err != nil {
+		return nil, err
+	}
 
-	getApi(url, &files)
-
-	return files
+	return files, nil
 }
 
 func deleteFile(id string) bool {
@@ -155,31 +82,34 @@ func deleteFile(id string) bool {
 	}
 	defer resp.Body.Close()
 
-	fd := &fileDelete{}
-
-	if err := json.NewDecoder(resp.Body).Decode(fd); err != nil {
+	fd := make(map[string]interface{})
+	if err := json.NewDecoder(resp.Body).Decode(&fd); err != nil {
 		log.Println(err)
 	}
 
-	return fd.Ok
+	return fd["ok"].(bool)
 }
 
 func main() {
 
-	if !authenticate() {
-		log.Fatal("Unable to authenticate")
+	ok, err := authenticate()
+	if err != nil || ok == false {
+		log.Fatal("Unable to authenticate\n")
 	}
 
-	files := getFileList()
-	if len(files.Files) == 0 {
+	fileList, err := getFileList()
+	if err != nil {
+		log.Fatal("Unable to retrieve file list")
+	}
+	if len(fileList) == 0 {
 		log.Fatal("File list is empty")
 	}
 
-	fmt.Printf("Found %d files\n", len(files.Files))
+	fmt.Printf("Found %d files\n", len(fileList))
 
-	for _, f := range files.Files {
-		fmt.Printf("Deleting: %s", f.Name)
-		deleteFile(f.ID)
+	files := fileList["files"].([]interface{})
+	for i := 0; i < len(files); i++ {
+		deleteFile(files[i].(map[string]interface{})["id"].(string))
 	}
 
 }
